@@ -4,7 +4,7 @@ import (
 	"github.com/go-redis/redis"
 )
 
-func ConnectRedis() (*redis.Client, error) {
+func RedisConnect() (*redis.Client, error) {
 
 	//addr := os.Getenv("ADDR_REDIS")
 	//pass := os.Getenv("PASSWORD")
@@ -17,7 +17,7 @@ func ConnectRedis() (*redis.Client, error) {
 
 	return rdb, nil
 }
-func ConnectRedisID(id int) (*redis.Client, error) {
+func RedisConnect_ID(id int) (*redis.Client, error) {
 
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",

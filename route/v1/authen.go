@@ -6,17 +6,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func AuthenRoute(route *gin.RouterGroup) {
-
-	route.POST("/login", controller.Login)
-	route.POST("/token", controller.GetNewToken)
-	route.POST("/signup", controller.Signup)
+func Route_Authen(route *gin.RouterGroup) {
+	route.POST("/signup", controller.POST_Signup)
+	route.POST("/login", controller.POST_Login)
+	route.POST("/token", controller.POST_RefreshToken)
 
 	route.Use(controller.VerlifyAccess())
 
 	{
-
-		route.POST("/logout", controller.Logout)
+		route.POST("/logout", controller.POST_Logout)
 	}
 
 }

@@ -5,170 +5,241 @@ import (
 	"https/repository"
 	"https/utils"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
-func Login(c *gin.Context) {
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX SIGN UP XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+func POST_Signup(c *gin.Context) {
+	utils.Block{
+		Try: func() {
 
-	var user models.User
-	err := c.ShouldBindJSON(&user)
-	if err != nil {
-		message := models.Invalid_syntax()
-		c.JSON(http.StatusBadRequest, message)
-		return
-	} else {
+			var user models.User
+			err := c.ShouldBindJSON(&user)
+			if err != nil {
+				utils.Throw("INVALID DATA")
+			}
 
-		if repository.LoginDB(&user) == true {
+			UserDB := repository.Password_enclip(user)
+			UserDB.Is_Baned = false
+			UserDB.Ban_Time = time.Date(time.Now().Year()-10, 1, 1, 0, 0, 0, 0, time.UTC)
+			UserDB.Is_Admin = false
+			filter := bson.M{"$or": []bson.M{bson.M{"username": UserDB.Username}, bson.M{"email": UserDB.Email}}}
+			cur, err := repository.GET_Mongo_Many("user", filter)
+			if err != nil {
+				utils.Throw("GET DATA ERROR")
+			}
 
-			//-----------------old----------------------
-			at, rt := utils.GenerateToken(user.Username, user.ID.Hex(), user.Is_Admin)
-			c.JSON(http.StatusOK, models.Authen{
-				Username:     user.Username,
-				AccessToken:  at,
-				RefreshToken: rt,
-			})
-			//--------------end old--------------------
+			signupPass, err := repository.CheckUserArradySighup(cur, UserDB)
+			if err != nil {
+				utils.Throw("DECODE DATA ERROR")
+			}
+			if !signupPass {
+				utils.Throw("USERNAME OR EMAIL ALREADY USED")
+			}
+			err = repository.POST_Mongo_One("user", UserDB)
+			if err != nil {
+				utils.Throw("INSERT DATA ERROR")
 
-		} else {
-			message := models.User_not_found()
-			c.JSON(http.StatusOK, message)
-		}
+			}
 
-	}
+			c.JSON(http.StatusOK, models.Signup_success())
+
+		},
+		Catch: func(e utils.Exception) {
+			switch e.(string) {
+			case "INVALID DATA":
+				c.AbortWithStatusJSON(400, models.Invalid_syntax())
+			case "GET DATA ERROR":
+				c.AbortWithStatusJSON(500, models.Get_Data_Error())
+			case "DECODE DATA ERROR":
+				c.AbortWithStatusJSON(500, models.Decode_error())
+			case "USERNAME OR EMAIL ALREADY USED":
+				c.AbortWithStatusJSON(403, models.Username_Or_Email_AlreadyUsed())
+			case "INSERT DATA ERROR":
+				c.AbortWithStatusJSON(500, models.Insert_error())
+			default:
+				c.AbortWithStatusJSON(400, models.Signup_error())
+			}
+		},
+		Finally: func() {
+
+		},
+	}.Do()
 }
 
-func VerlifyAccess() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
+//XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX LOGIN XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+func POST_Login(c *gin.Context) {
+	utils.Block{
+		Try: func() {
 
-		if authHeader == "" {
-
-			c.AbortWithStatus(401)
-
-		} else {
-			token, err := utils.Get_tokenJWT(authHeader)
-			_, _, _, isaddmin := utils.ParseJson_all_Info(token)
-
-			if !isaddmin {
-
-				if !token.Valid {
-
-					if err.Error() == "Token is expired" {
-
-						//c.AbortWithStatus(401)
-						c.AbortWithStatusJSON(403, models.Token_expired())
-					} else {
-						//c.AbortWithStatus(403)
-						c.AbortWithStatusJSON(401, models.Invalid_token())
-					}
+			var user models.User
+			err := c.ShouldBindJSON(&user)
+			if err != nil {
+				utils.Throw("INVALID DATA")
+			}
+			UserDB := repository.Password_enclip(user)
+			var DbFound models.UserDB
+			//filter := bson.M{"username": UserDB.Username, "password": UserDB.Password}
+			filter := bson.M{"$and": []bson.M{bson.M{"username": UserDB.Username}, bson.M{"password": UserDB.Password}}}
+			err = repository.GET_Mongo_FindOne_withFilter("user", filter, &DbFound)
+			if err != nil {
+				if err.Error() == "mongo: no documents in result" {
+					utils.Throw("WRONG USERNAME OR PASSWORD")
+				} else if err != nil {
+					utils.Throw("GET DATA ERROR")
 				}
 			}
 
-		}
-
-	}
-}
-
-func GetNewToken(c *gin.Context) {
-
-	var rt models.RefreshToken
-
-	err := c.ShouldBindJSON(&rt)
-
-	if err != nil {
-		message := models.Invalid_syntax()
-		c.JSON(http.StatusOK, message)
-	} else {
-
-		token, _ := utils.ValidRefreshToken(rt.RefreshToken)
-
-		if !token.Valid {
-
-			//c.AbortWithStatus(403)
-			c.JSON(http.StatusOK, models.Invalid_token())
-		} else {
-
-			_, username, playerID, is_addmin := utils.ParseJson_all_Info(token)
-			tokenVal, _ := repository.GetToken(username)
-			if tokenVal == rt.RefreshToken {
-				at, rt := utils.GenerateToken(username, playerID, is_addmin)
-				c.JSON(http.StatusOK, models.Token{
-					AccessToken:  at,
-					RefreshToken: rt,
-				})
-			} else {
-				//c.AbortWithStatus(403)
-				c.JSON(http.StatusOK, models.Token_not_found())
+			if repository.IsBaned(&DbFound) {
+				utils.Throw("HAS BEEN BANED")
 			}
 
-		}
-	}
+			at, rt := utils.GenerateToken(DbFound.Username, DbFound.ID.Hex(), DbFound.Is_Admin)
+			c.JSON(http.StatusOK, models.Authen{
+				Username:     DbFound.Username,
+				AccessToken:  at,
+				RefreshToken: rt,
+			})
+		},
+		Catch: func(e utils.Exception) {
+			switch e.(string) {
+			case "INVALID DATA":
+				c.AbortWithStatusJSON(400, models.Invalid_syntax())
+			case "GET DATA ERROR":
+				c.AbortWithStatusJSON(500, models.Get_Data_Error())
+			case "DECODE DATA ERROR":
+				c.AbortWithStatusJSON(500, models.Decode_error())
+			case "WRONG USERNAME OR PASSWORD":
+				c.AbortWithStatusJSON(403, models.Incorrect_Username_or_Password())
+			case "HAS BEEN BANED":
+				c.AbortWithStatusJSON(403, models.Baned_User())
+			default:
+				c.AbortWithStatusJSON(400, models.Login_error())
+			}
+		},
+		Finally: func() {
+
+		},
+	}.Do()
+
 }
 
-func Logout(c *gin.Context) {
+func POST_Logout(c *gin.Context) {
+	utils.Block{
+		Try: func() {
 
-	var rt models.RefreshToken
+			var retoken models.RefreshToken
+			err := c.ShouldBindJSON(&retoken)
 
-	err := c.ShouldBindJSON(&rt)
-
-	if err != nil {
-		message := models.Invalid_syntax()
-		c.JSON(http.StatusOK, message)
-	} else {
-		token, err := utils.ValidRefreshToken(rt.RefreshToken)
-
-		if !token.Valid {
-			if err.Error() == "Token is expired" {
-				c.AbortWithStatus(http.StatusForbidden)
-				c.JSON(http.StatusOK, models.Token_expired())
-			} else {
-				//c.AbortWithStatus(403)
-				c.JSON(http.StatusOK, models.Invalid_token())
+			if err != nil {
+				utils.Throw("INVALID DATA")
 			}
-		} else {
-
-			_, username, _, _ := utils.ParseJson_all_Info(token)
-			tokenVal, _ := repository.GetToken(username)
-			if tokenVal == rt.RefreshToken {
-
-				repository.DeleteToken(username)
-				message := models.Logout_success()
-				c.JSON(http.StatusOK, message)
-
-			} else {
-				//c.AbortWithStatus(403)
-				c.JSON(http.StatusOK, models.Invalid_token())
-
+			//token
+			authHeader := c.GetHeader("Authorization")
+			if authHeader == "" {
+				utils.Throw("NO AUTH")
+			}
+			tokenData, err := utils.Token_StringToData(authHeader)
+			if err != nil {
+				utils.Throw("TOKEN INVALID")
+			}
+			//ref Token
+			refTokenData, err := utils.RefToken_StringToData(retoken.RefreshToken)
+			if err != nil {
+				utils.Throw("INVALID DATA")
+			}
+			if tokenData.Username != refTokenData.Username || tokenData.PlayerID != refTokenData.PlayerID {
+				utils.Throw("TOKEN NOT MATCH")
+			}
+			stringToken, err := repository.GET_Redis_String(refTokenData.Username)
+			if err != nil {
+				utils.Throw("TOKEN NOT FOUND")
+			}
+			if stringToken != retoken.RefreshToken {
+				utils.Throw("TOKEN NOT MATCH")
+			}
+			err = repository.DEL_Redis_String(tokenData.Username)
+			if err != nil {
+				utils.Throw("LOGOUT ERROR")
 			}
 
-		}
-	}
+			c.JSON(http.StatusOK, models.Logout_success())
+		},
+		Catch: func(e utils.Exception) {
+			switch e.(string) {
+			case "INVALID DATA":
+				c.AbortWithStatusJSON(400, models.Invalid_syntax())
+			case "TOKEN INVALID":
+				c.AbortWithStatusJSON(400, models.Token_invalid())
+			case "NO AUTH":
+				c.AbortWithStatusJSON(401, models.Authentication_nil())
+			case "TOKEN NOT MATCH":
+				c.AbortWithStatusJSON(401, models.Token_not_match())
+			case "TOKEN NOT FOUND":
+				c.AbortWithStatusJSON(400, models.Token_not_found())
+
+			default:
+				c.AbortWithStatusJSON(400, models.Logout_error())
+			}
+		},
+		Finally: func() {
+
+		},
+	}.Do()
 
 }
-func Signup(c *gin.Context) {
+func POST_RefreshToken(c *gin.Context) {
 
-	var newuser models.User
+	utils.Block{
+		Try: func() {
 
-	err := c.ShouldBindJSON(&newuser)
+			var retoken models.RefreshToken
+			err := c.ShouldBindJSON(&retoken)
 
-	if err != nil {
+			if err != nil {
+				utils.Throw("INVALID DATA")
+			}
+			//ref Token
+			refTokenData, err := utils.RefToken_StringToData(retoken.RefreshToken)
+			if err != nil {
+				utils.Throw("TOKEN INVALID")
+			}
+			//IMDB reset token
+			stringRETOKEN, err := repository.GET_Redis_String(refTokenData.Username)
+			if err != nil {
+				utils.Throw("TOKEN NOT FOUND")
+			}
+			if stringRETOKEN != retoken.RefreshToken {
+				utils.Throw("TOKEN NOT MATCH")
+			}
+			rETOKENDATA, err := utils.RefToken_StringToData(stringRETOKEN)
+			if err != nil {
+				utils.Throw("TOKEN INVALID")
+			}
+			at, rt := utils.GenerateToken(rETOKENDATA.Username, rETOKENDATA.PlayerID, rETOKENDATA.Is_Addmin)
+			c.JSON(http.StatusOK, models.Token{AccessToken: at, RefreshToken: rt})
+		},
+		Catch: func(e utils.Exception) {
+			switch e.(string) {
+			case "INVALID DATA":
+				c.AbortWithStatusJSON(400, models.Invalid_syntax())
+			case "TOKEN INVALID":
+				c.AbortWithStatusJSON(400, models.Token_invalid())
+			case "TOKEN NOT FOUND":
+				c.AbortWithStatusJSON(400, models.Token_not_found())
+			case "TOKEN NOT MATCH":
+				c.AbortWithStatusJSON(401, models.Token_not_match())
+			default:
+				c.AbortWithStatusJSON(400, models.Get_Data_Error())
+			}
 
-		message := models.Invalid_syntax()
-		c.JSON(http.StatusOK, message)
+		},
+		Finally: func() {
 
-	} else {
-
-		isSignupPass := repository.User_signupDB(&newuser)
-
-		if isSignupPass == true {
-			message := models.Signup_success()
-			c.JSON(http.StatusOK, message)
-		} else {
-			message := models.Username_Or_Email_AlreadyUsed()
-			c.JSON(http.StatusOK, message)
-		}
-
-	}
+		},
+	}.Do()
 
 }

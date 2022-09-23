@@ -18,10 +18,10 @@ func IndexRoute() {
 	server.Use(CORSMiddleware())
 	v1 := server.Group("/v1")
 
-	version1.AuthenRoute(v1)
+	version1.Route_Authen(v1)
 
-	//	server.Run(":" + os.Getenv("port")) //http
-	server.RunTLS(":"+os.Getenv("port"), "server.pem", "server.key") //https
+	server.Run(":" + os.Getenv("port")) //http
+	//	server.RunTLS(":"+os.Getenv("port"), "server.pem", "server.key") //https
 
 }
 func CORSMiddleware() gin.HandlerFunc {
